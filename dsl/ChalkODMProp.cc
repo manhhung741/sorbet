@@ -11,6 +11,21 @@ using namespace std;
 
 namespace sorbet::dsl {
 
+bool isT(ast::Expression *expr) {
+    auto *t = ast::cast_tree<ast::UnresolvedConstantLit>(expr);
+    return t != nullptr && t->cnst == core::Names::Constants::T() && ast::isa_tree<ast::EmptyTree>(t->scope.get());
+}
+
+bool isTNilable(ast::Expression *expr) {
+    auto *nilable = ast::cast_tree<ast::Send>(expr);
+    return nilable != nullptr && nilable->fun == core::Names::nilable() && isT(nilable->recv.get());
+}
+
+bool ChalkODMProp::isTStruct(ast::Expression *expr) {
+    auto *struct_ = ast::cast_tree<ast::UnresolvedConstantLit>(expr);
+    return struct_ != nullptr && struct_->cnst == core::Names::Constants::Struct() && isT(struct_->scope.get());
+}
+
 optional<ChalkODMProp::NodesAndProp> ChalkODMProp::replaceDSL(core::MutableContext ctx, ast::Send *send) {
     if (ctx.state.runningUnderAutogen) {
         // TODO(jez) Verify whether this DSL pass is safe to run in for autogen
@@ -148,9 +163,16 @@ optional<ChalkODMProp::NodesAndProp> ChalkODMProp::replaceDSL(core::MutableConte
     // From this point, we can't `return std::nullopt` anymore since we're going to be consuming the tree.
 
     ChalkODMProp::NodesAndProp ret;
+    ret.prop.name = name;
+    ret.prop.type = ASTUtil::dupType(type.get());
+    ret.prop.optional = isTNilable(type.get());
 
     // Compute the getters
     if (rules) {
+        if (ASTUtil::hasHashValue(ctx, *rules, core::Names::default_()) ||
+            ASTUtil::hasHashValue(ctx, *rules, core::Names::factory())) {
+            ret.prop.optional = true;
+        }
         if (ASTUtil::hasHashValue(ctx, *rules, core::Names::immutable())) {
             isImmutable = true;
         }
